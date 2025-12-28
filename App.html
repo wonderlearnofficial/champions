@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Classroom Gamification Leaderboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f0f8ff; margin: 20px; }
+        h1, h2 { text-align: center; color: #333; }
+        button { padding: 8px 12px; margin: 5px; cursor: pointer; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; background: white; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: center; }
+        th { background: #4CAF50; color: white; }
+        input[type="text"], input[type="number"] { width: 80px; }
+        input:disabled { background: #f0f0f0; }
+        /* Medal backgrounds with high-contrast text */
+        .gold { background: gold !important; color: black !important; font-weight: bold; }
+        .silver { background: silver !important; color: black !important; font-weight: bold; }
+        .bronze { background: #cd7f32 !important; color: white !important; font-weight: bold; }
+        tr { cursor: pointer; transition: background 0.2s; }
+        tr:hover { background: #f9f9f9 !important; }
+        .tabs { overflow: hidden; border: 1px solid #ccc; background: #f1f1f1; }
+        .tablink { background: #ccc; float: left; border: none; outline: none; cursor: pointer; padding: 14px 16px; }
+        .tablink:hover { background: #ddd; }
+        .tablink.active { background: #fff; }
+        .tabcontent { display: none; padding: 20px; border: 1px solid #ccc; border-top: none; background: white; }
+        .tabcontent.active { display: block; }
+        .stars { color: gold; font-size: 1.2em; }
+        .score { font-weight: bold; font-size: 1.3em; color: #2c3e50; }
+        select { padding: 8px; margin: 10px 0; font-size: 1em; }
+        /* Popup */
+        .popup { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border: 2px solid #4CAF50; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); z-index: 1000; text-align: center; max-width: 300px; }
+        .overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999; }
+        .close-popup { margin-top: 15px; padding: 8px 16px; background: #f44336; color: white; border: none; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>🏆 Classroom Gamification Dashboard 🏆</h1>
+    <p style="text-align:center; font-size:1.1em;">Scoring: 1 XP = 1 point | 1 Star = 5 points<br><em>Click any team row to see score breakdown</em></p>
+
+    <div class="tabs">
+        <button class="tablink active" onclick="openTab(event, 'Dashboard')">Main Dashboard</button>
+        <button class="tablink" onclick="openTab(event, 'Activities')">Activities & Grading</button>
+        <button class="tablink" onclick="openTab(event, 'Manage')">Manage Teams & Activities</button>
+    </div>
+
+    <!-- Main Dashboard Tab -->
+    <div id="Dashboard" class="tabcontent active">
+        <h2>Global Leaderboard</h2>
+        <table id="leaderboardTable">
+            <thead>
+                <tr><th>Rank</th><th>Team Name</th><th>Total Score</th><th>Total XP</th><th>Total Stars</th></tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+    <!-- Activities Tab -->
+    <div id="Activities" class="tabcontent">
+        <h2>Grade Activities</h2>
+        <select id="activitySelect" onchange="loadActivity()"></select>
+        <div id="activityContainer" style="display:none;">
+            <h3 id="currentActivityName"></h3>
+            <table id="activityTable">
+                <thead><tr><th>Team</th><th>Attendance</th><th>XP (0-10)</th><th>Stars (0-3)</th><th>Feedback</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        <p id="noActivityMessage">← Select an activity from the dropdown to start grading.</p>
+    </div>
+
+    <!-- Manage Tab -->
+    <div id="Manage" class="tabcontent">
+        <h2>Manage Teams & Activities</h2>
+        <div>
+            <h3>Add Team</h3>
+            <input type="text" id="newTeam" placeholder="Team Name">
+            <button onclick="addTeam()">Add Team</button>
+        </div>
+        <div style="margin-top: 20px;">
+            <h3>Add Activity</h3>
+            <input type="text" id="newActivity" placeholder="Activity Name (e.g., Activity 01)">
+            <button onclick="addActivity()">Add Activity</button>
+            <p>Maximum 20 activities.</p>
+        </div>
+        <div style="margin-top: 30px;">
+            <button onclick="resetAll()" style="background:red;color:white;">Reset All Data (Caution!)</button>
+        </div>
+    </div>
+
+    <!-- Popup Overlay -->
+    <div id="overlay" class="overlay" onclick="closePopup()"></div>
+    <div id="popup" class="popup">
+        <h3 id="popupTeam"></h3>
+        <p id="popupDetails" style="font-size:1.2em;"></p>
+        <button class="close-popup" onclick="closePopup()">Close</button>
+    </div>
+
+    <script>
+        let data = { teams: [], activities: [], scores: {} };
+        let currentActivity = null;
+
+        function loadData() {
+            const saved = localStorage.getItem('classroomData');
+            if (saved) data = JSON.parse(saved);
+            updateAll();
+        }
+
+        function saveData() {
+            localStorage.setItem('classroomData', JSON.stringify(data));
+            updateLeaderboard();
+            if (currentActivity) loadActivity();
+        }
+
+        function updateAll() {
+            updateLeaderboard();
+            updateActivitySelect();
+        }
+
+        function addTeam() {
+            const name = document.getElementById('newTeam').value.trim();
+            if (name && !data.teams.includes(name)) {
+                data.teams.push(name);
+                data.activities.forEach(act => {
+                    if (!data.scores[act]) data.scores[act] = {};
+                    data.scores[act][name] = {attend: false, xp: 0, stars: 0, feedback: ''};
+                });
+                document.getElementById('newTeam').value = '';
+                saveData();
+            }
+        }
+
+        function addActivity() {
+            const name = document.getElementById('newActivity').value.trim();
+            if (name && data.activities.length < 20 && !data.activities.includes(name)) {
+                data.activities.push(name);
+                data.scores[name] = {};
+                data.teams.forEach(team => {
+                    data.scores[name][team] = {attend: false, xp: 0, stars: 0, feedback: ''};
+                });
+                document.getElementById('newActivity').value = '';
+                saveData();
+            }
+        }
+
+        function updateLeaderboard() {
+            const tbody = document.querySelector('#leaderboardTable tbody');
+            tbody.innerHTML = '';
+            if (data.teams.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5">No teams yet. Add some in the Manage tab!</td></tr>';
+                return;
+            }
+
+            const totals = data.teams.map(team => {
+                let totalXP = 0, totalStars = 0;
+                data.activities.forEach(act => {
+                    const s = data.scores[act]?.[team] || {xp:0, stars:0, attend:false};
+                    totalXP += s.attend ? s.xp : 0;
+                    totalStars += s.stars;
+                });
+                const totalScore = totalXP * 1 + totalStars * 5;
+                return {team, totalXP, totalStars, totalScore};
+            });
+
+            totals.sort((a, b) => b.totalScore - a.totalScore || b.totalXP - a.totalXP || b.totalStars - a.totalStars);
+
+            totals.forEach((row, i) => {
+                const tr = document.createElement('tr');
+                if (i === 0) tr.classList.add('gold');
+                if (i === 1) tr.classList.add('silver');
+                if (i === 2) tr.classList.add('bronze');
+
+                tr.onclick = () => showPopup(row.team, row.totalXP, row.totalStars, row.totalScore);
+
+                tr.innerHTML = `
+                    <td>${i+1} ${i<3 ? '🏅' : ''}</td>
+                    <td>${row.team}</td>
+                    <td class="score">${row.totalScore}</td>
+                    <td>${row.totalXP}</td>
+                    <td class="stars">${'⭐'.repeat(row.totalStars)} (${row.totalStars})</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function showPopup(team, xp, stars, score) {
+            document.getElementById('popupTeam').textContent = team;
+            document.getElementById('popupDetails').innerHTML = `
+                <strong>${xp}</strong> XP × 1 = ${xp} points<br><br>
+                <strong>${stars}</strong> ⭐ × 5 = ${stars * 5} points<br><br>
+                <strong>Total Score: ${score}</strong>
+            `;
+            document.getElementById('overlay').style.display = 'block';
+            document.getElementById('popup').style.display = 'block';
+        }
+
+        function closePopup() {
+            document.getElementById('overlay').style.display = 'none';
+            document.getElementById('popup').style.display = 'none';
+        }
+
+        function updateActivitySelect() {
+            const select = document.getElementById('activitySelect');
+            select.innerHTML = '<option value="">-- Select Activity to Grade --</option>';
+            data.activities.forEach(act => {
+                const opt = document.createElement('option');
+                opt.value = act;
+                opt.text = act;
+                if (act === currentActivity) opt.selected = true;
+                select.appendChild(opt);
+            });
+        }
+
+        function loadActivity() {
+            const select = document.getElementById('activitySelect');
+            currentActivity = select.value;
+            const container = document.getElementById('activityContainer');
+            const nameDisplay = document.getElementById('currentActivityName');
+            const noMsg = document.getElementById('noActivityMessage');
+            const tbody = document.querySelector('#activityTable tbody');
+            tbody.innerHTML = '';
+
+            if (!currentActivity) {
+                container.style.display = 'none';
+                noMsg.style.display = 'block';
+                return;
+            }
+
+            container.style.display = 'block';
+            noMsg.style.display = 'none';
+            nameDisplay.textContent = `Grading: ${currentActivity}`;
+
+            data.teams.forEach(team => {
+                const s = data.scores[currentActivity][team] || {attend: false, xp: 0, stars: 0, feedback: ''};
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${team}</td>
+                    <td><input type="checkbox" ${s.attend ? 'checked' : ''} onchange="updateScore('${team}', 'attend', this.checked)"></td>
+                    <td><input type="number" min="0" max="10" value="${s.attend ? s.xp : 0}" ${!s.attend ? 'disabled' : ''} onchange="updateScore('${team}', 'xp', this.value)"></td>
+                    <td><input type="number" min="0" max="3" value="${s.stars}" onchange="updateScore('${team}', 'stars', this.value)"></td>
+                    <td><input type="text" value="${s.feedback}" onchange="updateScore('${team}', 'feedback', this.value)" style="width:100%"></td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function updateScore(team, field, value) {
+            if (!data.scores[currentActivity][team]) data.scores[currentActivity][team] = {attend: false, xp: 0, stars: 0, feedback: ''};
+
+            if (field === 'attend') {
+                data.scores[currentActivity][team].attend = value;
+                if (!value) data.scores[currentActivity][team].xp = 0;
+            } else if (field === 'xp') {
+                value = Math.max(0, Math.min(10, parseInt(value) || 0));
+                if (data.scores[currentActivity][team].attend) {
+                    data.scores[currentActivity][team].xp = value;
+                }
+            } else if (field === 'stars') {
+                value = Math.max(0, Math.min(3, parseInt(value) || 0));
+                data.scores[currentActivity][team].stars = value;
+            } else if (field === 'feedback') {
+                data.scores[currentActivity][team].feedback = value;
+            }
+
+            saveData();
+        }
+
+        function openTab(evt, tabName) {
+            document.querySelectorAll('.tabcontent').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tablink').forEach(b => b.classList.remove('active'));
+            document.getElementById(tabName).classList.add('active');
+            evt.currentTarget.classList.add('active');
+
+            if (tabName === 'Dashboard') updateLeaderboard();
+            if (tabName === 'Activities') {
+                updateActivitySelect();
+                loadActivity();
+            }
+        }
+
+        function resetAll() {
+            if (confirm('This will delete ALL teams, activities, and scores. Are you sure?')) {
+                localStorage.removeItem('classroomData');
+                data = { teams: [], activities: [], scores: {} };
+                currentActivity = null;
+                updateAll();
+                loadActivity();
+            }
+        }
+
+        loadData();
+    </script>
+</body>
+</html>
